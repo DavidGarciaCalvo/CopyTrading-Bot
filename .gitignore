@@ -1,0 +1,12 @@
+# Claves y configuración sensible
+.env
+config.py
+__pycache__/
+
+# Base de datos y archivos de balance local
+trading_bot.db
+balance_acumulado.txt
+
+# Archivos de entorno virtual
+venv/
+.vscode/

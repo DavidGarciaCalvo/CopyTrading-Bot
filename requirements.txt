@@ -1,0 +1,15 @@
+# --- Librerías Principales del Proyecto ---
+
+# Conexión con APIs (Helius y Binance)
+requests
+
+# Gestión de variables de entorno (Seguridad de API Keys)
+python-dotenv
+
+# Base de datos y ORM (Persistencia de datos)
+SQLAlchemy
+
+# Análisis de datos (Para el módulo de métricas del TFG)
+pandas
+numpy
+matplotlib
