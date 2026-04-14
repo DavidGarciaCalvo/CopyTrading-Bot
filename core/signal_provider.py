@@ -13,15 +13,7 @@ class SignalProvider:
         self.last_trade_time = {wallet: 0 for wallet in self.wallets_dict.keys()}
         self.cooldown_seconds = 60
 
-    def get_signal(self, mock: bool = False):
-        if mock:
-            return [{
-                "asset": "SOL/USDT",
-                "side": "LONG",
-                "signature": "MOCK_SIG_INICIAL",
-                "label": "TEST_SISTEMA"
-            }]
-
+    def get_signal(self):
         nuevas_señales = []
         stables = ["USDC", "USDT", "USDH", "UXD"]
 
@@ -91,6 +83,7 @@ class SignalProvider:
                         continue
 
                     target_token = None
+                    side = "LONG"
 
                                         # -------------------------------
                     # 1) INTENTO POR SWAP (modo robusto)
@@ -109,9 +102,21 @@ class SignalProvider:
                             token_entrante_no_stable = t.get("symbol")
                             break
 
+                    vendio_por_stable = any(
+                        (t.get("toUserAccount") == wallet) and (t.get("symbol") in stables)
+                        for t in token_transfers
+                    )
+                    token_saliente_no_stable = None
+                    for t in token_transfers:
+                        if (t.get("fromUserAccount") == wallet) and (t.get("symbol") not in stables):
+                            token_saliente_no_stable = t.get("symbol")
+                            break
+
                     if compro_con_stable and token_entrante_no_stable:
-                        # Caso ideal: compra clara (stable -> token)
                         target_token = token_entrante_no_stable
+                    elif vendio_por_stable and token_saliente_no_stable:
+                        target_token = token_saliente_no_stable
+                        side = "SELL"
                     else:
                         # Fallback a tu lógica anterior (por si Helius no rellena bien tokenTransfers)
                         events = (tx or {}).get("events") or {}
@@ -150,18 +155,19 @@ class SignalProvider:
                                 break
 
                     # -------------------------------
-                    # 3) FILTRO DE “COMPRA REAL” (primera prueba)
+                    # 3) FILTRO DE “COMPRA/VENTA REAL”
                     # -------------------------------
                     if target_token and target_token not in stables:
-                        salio_stable = False
-                        for tfer in token_transfers:
-                            if tfer.get("fromUserAccount") == wallet and (tfer.get("symbol") in stables):
-                                salio_stable = True
-                                break
-
-                        if target_token != "SOL" and not salio_stable:
-                            print(f"    ⚠️ Ignorada: entra {target_token} pero no sale stable (posible ruta/ruido/airdrop)")
-                            continue
+                        if side == "LONG":
+                            salio_stable = any((t.get("fromUserAccount") == wallet and t.get("symbol") in stables) for t in token_transfers)
+                            if target_token != "SOL" and not salio_stable:
+                                print(f"    ⚠️ Ignorada: entra {target_token} pero no sale stable (posible ruta/ruido/airdrop)")
+                                continue
+                        elif side == "SELL":
+                            entro_stable = any((t.get("toUserAccount") == wallet and t.get("symbol") in stables) for t in token_transfers)
+                            if target_token != "SOL" and not entro_stable:
+                                print(f"    ⚠️ Ignorada: sale {target_token} pero no entra stable")
+                                continue
 
                         # Cooldown por wallet (anti-spam)
                         now = time.time()
@@ -172,12 +178,13 @@ class SignalProvider:
 
                         señal = {
                             "asset": f"{target_token}/USDT",
-                            "side": "LONG",
+                            "side": side,
                             "signature": sig,
                             "label": label
                         }
                         nuevas_señales.append(señal)
-                        print(f"    ✅ ¡Movimiento detectado! [{label}] Activo: {target_token}")
+                        accion_str = "COMPRA" if side == "LONG" else "VENTA"
+                        print(f"    ✅ ¡Movimiento detectado! [{label}] {accion_str} Activo: {target_token}")
 
             except Exception as e:
                 print(f"❌ Error de conexión/proceso en {wallet[:5]}...: {e}")

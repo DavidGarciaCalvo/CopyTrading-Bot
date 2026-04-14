@@ -11,6 +11,7 @@ class Operacion(Base):
 
     id = Column(Integer, primary_key=True)
     asset = Column(String)
+    side = Column(String, default="LONG")
     precio_entrada = Column(Float)
     cantidad_usdt = Column(Float)
     sl = Column(Float)
