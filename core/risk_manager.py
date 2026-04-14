@@ -6,13 +6,17 @@ class RiskManager:
         self.stop_loss_pct = Config.STOP_LOSS_PCT
         self.take_profit_pct = Config.TAKE_PROFIT_PCT
 
-    def calcular_entrada(self, balance_total, precio_entrada):
+    def calcular_entrada(self, balance_total, precio_entrada, side="LONG"):
         """
         Calcula el tamaño de la posición y los niveles de SL/TP.
         """
         cantidad_usdt = balance_total * self.risk_per_trade
-        sl = precio_entrada * (1 - self.stop_loss_pct)
-        tp = precio_entrada * (1 + self.take_profit_pct)
+        if side == "LONG":
+            sl = precio_entrada * (1 - self.stop_loss_pct)
+            tp = precio_entrada * (1 + self.take_profit_pct)
+        else:
+            sl = precio_entrada * (1 + self.stop_loss_pct)
+            tp = precio_entrada * (1 - self.take_profit_pct)
         return cantidad_usdt, sl, tp
 
     def validar_operacion(self, balance_disponible, cantidad_usdt):
