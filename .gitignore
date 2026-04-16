@@ -10,3 +10,6 @@ balance_acumulado.txt
 # Archivos de entorno virtual
 venv/
 .vscode/
+
+#Base de datos de pruebas
+database/copy_trading.db
