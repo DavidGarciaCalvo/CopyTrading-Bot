@@ -102,7 +102,7 @@ def main():
             follower_positions_by_market = construir_follower_positions_by_market(gestor.posiciones)
 
             resultados_perps = procesar_senales_perps(
-                wallet="HhZw63SHGfpAhdZLNTzfkNhwxPDrzPSAQM7ikDvXjqco",
+                wallet=Config.JUPITER_PERPS_WALLET,
                 follower_positions_by_market=follower_positions_by_market
             )
 
@@ -174,44 +174,95 @@ def main():
         except KeyboardInterrupt:
             print("\n\n⏸️ Bot pausado temporalmente.")
             abiertas = list(gestor.posiciones.keys())
+
             if abiertas:
-                print(f"📦 Posiciones abiertas: {', '.join(abiertas)}")
-                comando = input("👉 Escribe el activo a cerrar, 'CLOSEALL' para cerrar todas y salir, 'exit' para apagar, o Enter: ").strip().upper()
-                
+                print("📦 Posiciones abiertas:")
+                for i, activo in enumerate(abiertas, start=1):
+                    print(f"   {i}. {activo}")
+
+                comando = input(
+                    "👉 Escribe el número del activo a cerrar, su nombre completo, "
+                    "'CLOSEALL' para cerrar todas y salir, 'exit' para apagar, "
+                    "o Enter para continuar corriendo el bot: "
+                ).strip().upper()
+
                 if comando == "EXIT":
                     print("🛑 Apagando el bot...")
                     break
+
                 elif comando == "CLOSEALL":
                     print("🛑 Cerrando TODAS las posiciones...")
                     for activo in list(gestor.posiciones.keys()):
                         precio = obtener_precio_binance(activo)
                         if precio:
-                            gestor.cerrar_posicion(activo, precio, label="MANUAL", motivo="CIERRE MANUAL")
+                            gestor.cerrar_posicion(
+                                activo,
+                                precio,
+                                label="MANUAL",
+                                motivo="CIERRE MANUAL"
+                            )
                         else:
                             print(f"⚠️ No se pudo obtener el precio para {activo}. Se queda abierta.")
                     print("🛑 Apagando el bot...")
                     break
+
+                elif comando.isdigit():
+                    index = int(comando) - 1
+                    if 0 <= index < len(abiertas):
+                        activo = abiertas[index]
+                        precio = obtener_precio_binance(activo)
+
+                        if precio:
+                            gestor.cerrar_posicion(
+                                activo,
+                                precio,
+                                label="MANUAL",
+                                motivo="CIERRE MANUAL"
+                            )
+                        else:
+                            print(f"⚠️ No se pudo obtener el precio actual para {activo}.")
+
+                        sub_comando = input("👉 ¿Deseas apagar el bot ahora? (S/N): ").strip().upper()
+                        if sub_comando == "S" or sub_comando == "Y":
+                            print("🛑 Apagando el bot...")
+                            break
+                        else:
+                            print("▶️ Reanudando radar...")
+                    else:
+                        print("⚠️ Número inválido. Reanudando radar...")
+
                 elif comando in gestor.posiciones:
                     precio = obtener_precio_binance(comando)
                     if precio:
-                        gestor.cerrar_posicion(comando, precio, label="MANUAL", motivo="CIERRE MANUAL")
+                        gestor.cerrar_posicion(
+                            comando,
+                            precio,
+                            label="MANUAL",
+                            motivo="CIERRE MANUAL"
+                        )
                     else:
                         print(f"⚠️ No se pudo obtener el precio actual para {comando}.")
-                        
-                    # Preguntamos si desea salir después de cerrar una operación específica
+
                     sub_comando = input("👉 ¿Deseas apagar el bot ahora? (S/N): ").strip().upper()
                     if sub_comando == "S" or sub_comando == "Y":
                         print("🛑 Apagando el bot...")
                         break
                     else:
                         print("▶️ Reanudando radar...")
+
                 else:
                     print("▶️ Reanudando radar...")
+
             else:
-                comando = input("👉 No hay posiciones abiertas. Escribe 'exit' para apagar, o Enter para reanudar: ").strip().lower()
+                comando = input(
+                    "👉 No hay posiciones abiertas. Escribe 'exit' para apagar, "
+                    "o Enter para continuar corriendo el bot: "
+                ).strip().lower()
+
                 if comando == "exit":
                     print("🛑 Apagando el bot...")
                     break
+
                 print("▶️ Reanudando radar...")
         except Exception as e:
             print(f"\n⚠️ Error en el bucle principal: {e}")
