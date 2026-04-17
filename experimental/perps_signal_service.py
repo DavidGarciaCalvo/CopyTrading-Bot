@@ -1,5 +1,5 @@
-from poc_jupiter_perps import JupiterPerpsDetectorPOC
-from follower_interpreter import interpretar_senal_para_follower
+from experimental.poc_jupiter_perps import JupiterPerpsDetectorPOC
+from experimental.follower_interpreter import interpretar_senal_para_follower
 
 
 def procesar_senales_perps(wallet, follower_positions_by_market):
@@ -27,3 +27,26 @@ def procesar_senales_perps(wallet, follower_positions_by_market):
         })
 
     return resultados
+
+
+def traducir_follower_action_a_side(follower_action):
+    """
+    Traduce la acción contextual del follower a una side compatible con
+    PortfolioManager.procesar_señal().
+
+    Devuelve:
+    - "LONG"
+    - "SHORT"
+    - "CLOSE"
+    - None  -> no hacer nada / no soportado todavía
+    """
+    mapping = {
+        "OPEN_LONG": "LONG",
+        "OPEN_SHORT": "SHORT",
+        "CLOSE_LONG_AND_OPEN_SHORT": "SHORT",
+        "CLOSE_SHORT_AND_OPEN_LONG": "LONG",
+        "CLOSE_LONG": "CLOSE",
+        "CLOSE_SHORT": "CLOSE",
+    }
+
+    return mapping.get(follower_action)

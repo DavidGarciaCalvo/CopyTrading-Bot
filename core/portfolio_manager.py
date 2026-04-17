@@ -70,14 +70,16 @@ class PortfolioManager:
             print(f"⚠️ Error guardando balance en archivo: {e}")
 
     def procesar_señal(self, asset, precio_mercado, side="LONG", signature="MOCK_SIG", label="UNKNOWN"):
-        """Decide si abrir o cerrar una posición basándose en las señales."""
-        if side == "SELL": 
+        """Decide si abrir, ignorar o girar una posición basándose en las señales."""
+        if side == "SELL":
             side = "SHORT"
-            
+
         if asset in self.posiciones:
             pos_actual = self.posiciones[asset]
+
             if pos_actual.get('side', 'LONG') != side:
                 self.cerrar_posicion(asset, precio_mercado, label, motivo="CLOSED_SIGNAL")
+                self.abrir_posicion(asset, precio_mercado, side, signature, label)
             else:
                 print(f"⚠️ Ya existe una posición {side} abierta para {asset}. Ignorando señal.")
         else:
