@@ -1,0 +1,15 @@
+{
+  "wallet": "HhZw63SHGfpAhdZLNTzfkNhwxPDrzPSAQM7ikDvXjqco",
+  "timestamp": "2026-04-17T16:12:59.980391+00:00",
+  "positions": {
+    "WBTC": {
+      "side": "long",
+      "size": 0.013104619608186215,
+      "size_value": 984.1397,
+      "entry_price": 75098.685,
+      "mark_price": 78001.27396085,
+      "pnl_value": 38.03732421085976,
+      "liquidation_price": 72311.802276
+    }
+  }
+}
