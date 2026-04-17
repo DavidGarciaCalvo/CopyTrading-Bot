@@ -3,11 +3,19 @@ import os
 import requests
 from datetime import datetime, UTC
 
-WALLET = "HhZw63SHGfpAhdZLNTzfkNhwxPDrzPSAQM7ikDvXjqco"
-SNAPSHOT_FILE = "experimental/jupiter_snapshot.json"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SNAPSHOT_FILE = os.path.join(BASE_DIR, "jupiter_snapshot.json")
+
+SIZE_EPSILON_USD = 1.0
 
 
 class JupiterPerpsDetectorPOC:
+    """
+    Detector simple basado en snapshots para posiciones de Jupiter Perps.
+    Obtiene el estado actual de una wallet, lo compara con el snapshot previo
+    y traduce los cambios a señales limpias.
+    """
+
     def __init__(self, wallet):
         self.wallet = wallet
 
@@ -102,7 +110,7 @@ class JupiterPerpsDetectorPOC:
         after_size = after_pos.get("size_value", 0)
 
         if before_side == after_side:
-            if abs(after_size - before_size) < 1e-9:
+            if abs(after_size - before_size) < SIZE_EPSILON_USD:
                 return "NO_CHANGE"
 
             if after_size > before_size:
@@ -137,42 +145,64 @@ class JupiterPerpsDetectorPOC:
 
         return resultados
 
-    def traducir_evento_a_senal(self, evento, symbol):
-        bullish = {
-            "OPEN_LONG",
-            "INCREASE_LONG",
-            "REDUCE_SHORT",
-            "CLOSE_SHORT",
-            "FLIP_SHORT_TO_LONG",
-        }
+    def traducir_evento_a_senal(self, evento, symbol, before_pos=None, after_pos=None):
+        if evento == "NO_CHANGE":
+            return None
 
-        bearish = {
-            "OPEN_SHORT",
-            "INCREASE_SHORT",
-            "REDUCE_LONG",
-            "CLOSE_LONG",
-            "FLIP_LONG_TO_SHORT",
-        }
-
-        if evento in bullish:
-            return {
-                "asset": f"{symbol}/USDT",
-                "side": "LONG",
-                "action": "ABRIR_COMPRA_O_MANTENER_LONG",
-            }
-
-        if evento in bearish:
-            return {
-                "asset": f"{symbol}/USDT",
-                "side": "SHORT",
-                "action": "CERRAR_LONG_SI_EXISTE_O_SESGO_BAJISTA",
-            }
+        size_before = before_pos.get("size_value", 0) if before_pos else 0
+        size_after = after_pos.get("size_value", 0) if after_pos else 0
 
         return {
+            "provider": "jupiter_perps",
             "asset": f"{symbol}/USDT",
-            "side": None,
-            "action": "NO_HACER_NADA",
+            "market": symbol,
+            "signal_type": evento,
+            "leader_side_before": before_pos["side"] if before_pos else None,
+            "leader_side_after": after_pos["side"] if after_pos else None,
+            "size_before_usd": size_before,
+            "size_after_usd": size_after,
+            "size_delta_usd": size_after - size_before,
         }
+
+    def detectar_senales(self):
+        posiciones_antes = self.cargar_snapshot()
+
+        data = self.obtener_respuesta_cruda()
+        if data is None:
+            print("⚠️ No se pudo obtener respuesta válida de Jupiter. No se generan señales.")
+            return {
+                "before": posiciones_antes,
+                "after": posiciones_antes,
+                "changes": {},
+                "signals": [],
+            }
+
+        posiciones_despues = self.extraer_posiciones_limpias(data)
+        cambios = self.clasificar_cambios(posiciones_antes, posiciones_despues)
+
+        senales = []
+
+        for mercado, info in cambios.items():
+            senal = self.traducir_evento_a_senal(
+                info["event"],
+                mercado,
+                info["before"],
+                info["after"],
+            )
+            if senal is not None:
+                senales.append(senal)
+
+        self.guardar_snapshot(posiciones_despues)
+
+        return {
+            "before": posiciones_antes,
+            "after": posiciones_despues,
+            "changes": cambios,
+            "signals": senales,
+        }
+
+    def obtener_senales(self):
+        return self.detectar_senales()["signals"]
 
 
 def imprimir_posiciones(posiciones, titulo):
@@ -191,40 +221,42 @@ def imprimir_posiciones(posiciones, titulo):
         )
 
 
-def imprimir_cambios_y_senales(detector, cambios):
+def imprimir_cambios_y_senales(cambios, senales):
     print("\n📈 RESULTADO DEL STATE-DIFF")
+
     if not cambios:
         print("   (sin cambios)")
         return
 
-    for mercado, info in cambios.items():
-        senal = detector.traducir_evento_a_senal(info["event"], mercado)
+    senales_por_mercado = {s["market"]: s for s in senales}
 
+    for mercado, info in cambios.items():
         print(f"\n   Mercado: {mercado}")
         print(f"   Evento perp:   🚨 {info['event']} 🚨")
         print(f"   Antes:         {info['before']}")
         print(f"   Después:       {info['after']}")
-        print(f"   Señal simple:  {senal['side']}")
-        print(f"   Acción sugerida: {senal['action']}")
-        print(f"   Asset bot:     {senal['asset']}")
+
+        senal = senales_por_mercado.get(mercado)
+        if senal:
+            print(f"   Señal:         {senal['signal_type']}")
+            print(f"   Side antes:    {senal['leader_side_before']}")
+            print(f"   Side después:  {senal['leader_side_after']}")
+            print(f"   Delta USD:     {senal['size_delta_usd']:.4f}")
+            print(f"   Asset bot:     {senal['asset']}")
+        else:
+            print("   Señal:         ninguna")
 
 
 def main():
-    print("🚀 POC Jupiter Perps - detección de posiciones y traducción a señales")
+    print("🚀 POC Jupiter Perps - detección de posiciones y señales limpias")
 
-    detector = JupiterPerpsDetectorPOC(WALLET)
+    wallet_debug = "HhZw63SHGfpAhdZLNTzfkNhwxPDrzPSAQM7ikDvXjqco"
+    detector = JupiterPerpsDetectorPOC(wallet_debug)
+    resultado = detector.detectar_senales()
 
-    posiciones_antes = detector.cargar_snapshot()
-    imprimir_posiciones(posiciones_antes, "Snapshot anterior")
-
-    data = detector.obtener_respuesta_cruda()
-    posiciones_despues = detector.extraer_posiciones_limpias(data)
-    imprimir_posiciones(posiciones_despues, "Posiciones actuales")
-
-    cambios = detector.clasificar_cambios(posiciones_antes, posiciones_despues)
-    imprimir_cambios_y_senales(detector, cambios)
-
-    detector.guardar_snapshot(posiciones_despues)
+    imprimir_posiciones(resultado["before"], "Snapshot anterior")
+    imprimir_posiciones(resultado["after"], "Posiciones actuales")
+    imprimir_cambios_y_senales(resultado["changes"], resultado["signals"])
 
 
 if __name__ == "__main__":
