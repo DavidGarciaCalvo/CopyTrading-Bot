@@ -43,6 +43,8 @@ def traducir_follower_action_a_side(follower_action):
     mapping = {
         "OPEN_LONG": "LONG",
         "OPEN_SHORT": "SHORT",
+        "INCREASE_LONG": "LONG",
+        "INCREASE_SHORT": "SHORT",
         "CLOSE_LONG_AND_OPEN_SHORT": "SHORT",
         "CLOSE_SHORT_AND_OPEN_LONG": "LONG",
         "CLOSE_LONG": "CLOSE",

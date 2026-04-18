@@ -149,7 +149,8 @@ def main():
                             precio_mercado=precio_mercado,
                             side=side_traducida,
                             signature=f"PERPS_{signal['signal_type']}",
-                            label="JUPITER_PERPS"
+                            label="JUPITER_PERPS",
+                            signal_type=signal["signal_type"]
                         )
                         
             # 4. MONITORIZACIÓN: Revisamos salidas (SL/TP) de las posiciones abiertas
@@ -264,6 +265,7 @@ def main():
                     break
 
                 print("▶️ Reanudando radar...")
+
         except Exception as e:
             print(f"\n⚠️ Error en el bucle principal: {e}")
             time.sleep(10)  # Espera antes de reintentar

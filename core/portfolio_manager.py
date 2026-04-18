@@ -69,17 +69,24 @@ class PortfolioManager:
         except Exception as e:
             print(f"⚠️ Error guardando balance en archivo: {e}")
 
-    def procesar_señal(self, asset, precio_mercado, side="LONG", signature="MOCK_SIG", label="UNKNOWN"):
-        """Decide si abrir, ignorar o girar una posición basándose en las señales."""
+    def procesar_señal(self, asset, precio_mercado, side="LONG", signature="MOCK_SIG", label="UNKNOWN", signal_type=None):
+        """Decide si abrir, aumentar, ignorar o girar una posición basándose en las señales."""
         if side == "SELL":
             side = "SHORT"
 
         if asset in self.posiciones:
             pos_actual = self.posiciones[asset]
+            side_actual = pos_actual.get("side", "LONG")
 
-            if pos_actual.get('side', 'LONG') != side:
+            # Flip: cerrar la actual y abrir la nueva
+            if side_actual != side:
                 self.cerrar_posicion(asset, precio_mercado, label, motivo="CLOSED_SIGNAL")
                 self.abrir_posicion(asset, precio_mercado, side, signature, label)
+                return
+
+            # Mismo lado
+            if signal_type in {"INCREASE_LONG", "INCREASE_SHORT"}:
+                self.aumentar_posicion(asset, precio_mercado, signature, label)
             else:
                 print(f"⚠️ Ya existe una posición {side} abierta para {asset}. Ignorando señal.")
         else:
@@ -160,6 +167,85 @@ class PortfolioManager:
         )
         self.notifier.enviar_mensaje(msg)
 
+    def aumentar_posicion(self, asset, precio_mercado, signature="MOCK_SIG", label="UNKNOWN"):
+        """
+        Aumenta una posición existente del mismo lado, consolidando el tamaño
+        total y recalculando el precio medio de entrada.
+        """
+        if asset not in self.posiciones:
+            print(f"⚠️ No existe posición previa en {asset}. No se puede aumentar.")
+            return
+
+        posicion_actual = self.posiciones[asset]
+        side = posicion_actual["side"]
+
+        # Aplicamos slippage igual que en abrir_posicion
+        if side == "LONG":
+            nuevo_precio_entrada = precio_mercado * (1 + Config.EXPECTED_SLIPPAGE)
+        else:
+            nuevo_precio_entrada = precio_mercado * (1 - Config.EXPECTED_SLIPPAGE)
+
+        cantidad_usdt, sl, tp = self.risk_manager.calcular_entrada(
+            self.balance_actual,
+            nuevo_precio_entrada,
+            side
+        )
+
+        balance_disponible = self.balance_actual - self.margen_en_uso
+        es_valida, motivo = self.risk_manager.validar_operacion(balance_disponible, cantidad_usdt)
+
+        if not es_valida:
+            print(f"⚠️ Aumento de posición cancelado: {motivo}")
+            return
+
+        cantidad_actual = posicion_actual["cantidad"]
+        entrada_actual = posicion_actual["entrada"]
+
+        nueva_cantidad_total = cantidad_actual + cantidad_usdt
+        nuevo_precio_medio = (
+            (entrada_actual * cantidad_actual) + (nuevo_precio_entrada * cantidad_usdt)
+        ) / nueva_cantidad_total
+
+        # Consolidamos en una sola posición
+        self.posiciones[asset]["entrada"] = nuevo_precio_medio
+        self.posiciones[asset]["cantidad"] = nueva_cantidad_total
+        self.posiciones[asset]["sl"] = sl
+        self.posiciones[asset]["tp"] = tp
+        self.posiciones[asset]["signature"] = signature
+
+        self.margen_en_uso += cantidad_usdt
+
+        try:
+            session = Session()
+            op_db = session.query(Operacion).filter_by(asset=asset, status="OPEN").first()
+            if op_db:
+                op_db.precio_entrada = nuevo_precio_medio
+                op_db.cantidad_usdt = nueva_cantidad_total
+                op_db.sl = sl
+                op_db.tp = tp
+                op_db.signature_solana = signature
+                session.commit()
+            session.close()
+        except Exception as e:
+            print(f"⚠️ Error al actualizar BD al aumentar posición: {e}")
+
+        print(f"\n📈 [AUMENTO DE POSICIÓN {side}] {asset}")
+        print(f"   Cantidad añadida: {cantidad_usdt:.2f} USDT")
+        print(f"   Nueva cantidad total: {nueva_cantidad_total:.2f} USDT")
+        print(f"   Nuevo precio medio: {nuevo_precio_medio:.4f}")
+        print(f"   🛡️ SL: {sl:.4f} | 🎯 TP: {tp:.4f}")
+
+        msg = (
+            f"📈 *AUMENTO DE POSICIÓN: {side}*\n\n"
+            f"👤 *Perfil:* {label}\n"
+            f"📦 *Activo:* {asset}\n"
+            f"💰 *Nuevo precio medio:* {nuevo_precio_medio:.4f}\n"
+            f"💵 *Capital añadido:* {cantidad_usdt:.2f} USDT\n"
+            f"📊 *Tamaño total:* {nueva_cantidad_total:.2f} USDT\n"
+            f"🛡️ *SL:* {sl:.4f} | 🎯 *TP:* {tp:.4f}"
+        )
+        self.notifier.enviar_mensaje(msg)
+        
     def cerrar_posicion(self, asset, precio_mercado, label="UNKNOWN", motivo="CLOSED_SIGNAL"):
         """Cierra una posición de inmediato y procesa beneficios/pérdidas."""
         if asset not in self.posiciones:
