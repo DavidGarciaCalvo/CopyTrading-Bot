@@ -80,7 +80,7 @@ class JupiterPerpsDetectorPOC:
         with open(SNAPSHOT_FILE, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2, ensure_ascii=False)
 
-        print(f"📸 Snapshot guardado en {SNAPSHOT_FILE}")
+        # print(f"📸 Snapshot guardado en {SNAPSHOT_FILE}")
 
     def cargar_snapshot(self):
         if not os.path.exists(SNAPSHOT_FILE):
@@ -192,7 +192,11 @@ class JupiterPerpsDetectorPOC:
             if senal is not None:
                 senales.append(senal)
 
-        self.guardar_snapshot(posiciones_despues)
+        # Solo guardamos snapshot si hay cambios reales
+        hay_cambios = any(info["event"] != "NO_CHANGE" for info in cambios.values())
+
+        if hay_cambios:
+            self.guardar_snapshot(posiciones_despues)
 
         return {
             "before": posiciones_antes,

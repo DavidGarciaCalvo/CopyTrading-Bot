@@ -182,7 +182,7 @@ def main():
                     print(f"   {i}. {activo}")
 
                 comando = input(
-                    "👉 Escribe el número del activo a cerrar, su nombre completo, "
+                    "👉 Escribe el número del activo a cerrar, "
                     "'CLOSEALL' para cerrar todas y salir, 'exit' para apagar, "
                     "o Enter para continuar corriendo el bot: "
                 ).strip().upper()
