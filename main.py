@@ -18,6 +18,8 @@ from experimental.perps_signal_service import (
     procesar_senales_perps,
     traducir_follower_action_a_side
 )
+from runtime.state_manager import RuntimeStateManager
+from runtime.command_manager import RuntimeCommandManager
 
 
 def imprimir_bienvenida(balance_actual):
@@ -58,21 +60,105 @@ def construir_follower_positions_by_market(posiciones):
     return resultado
 
 
+def cerrar_todas_las_posiciones(gestor, motivo="REMOTE_CLOSEALL", label="REMOTE"):
+    abiertas = list(gestor.posiciones.keys())
+
+    if not abiertas:
+        print("⚪ No hay posiciones abiertas para cerrar.")
+        return "No había posiciones abiertas."
+
+    print("🛑 Cerrando TODAS las posiciones...")
+    cerradas = 0
+    no_cerradas = []
+
+    for activo in abiertas:
+        precio = obtener_precio_binance(activo)
+        if precio:
+            gestor.cerrar_posicion(
+                asset=activo,
+                precio_mercado=precio,
+                label=label,
+                motivo=motivo
+            )
+            cerradas += 1
+        else:
+            print(f"⚠️ No se pudo obtener el precio para {activo}. Se queda abierta.")
+            no_cerradas.append(activo)
+
+    if no_cerradas:
+        return f"Se cerraron {cerradas} posiciones. No se pudieron cerrar: {', '.join(no_cerradas)}"
+
+    return f"Se cerraron correctamente {cerradas} posiciones."
+
+
 def main():
     # 1. Inicialización de componentes
     try:
         signal_provider = SignalProvider()
         gestor = PortfolioManager()
+        runtime_state = RuntimeStateManager()
+        runtime_commands = RuntimeCommandManager()        
     except Exception as e:
         print(f"❌ Error al inicializar componentes: {e}")
         return
 
     imprimir_bienvenida(gestor.balance_actual)
 
+    runtime_state.initialize(
+        balance_actual=gestor.balance_actual,
+        open_positions=len(gestor.posiciones)
+    )
+
     print("\n🕵️ Radar iniciado. Buscando movimientos en la blockchain...")
     
     while True:
         try:
+            # 1B. CONTROL REMOTO: revisamos si hay comandos pendientes
+            comandos_pendientes = runtime_commands.get_pending_commands()
+            stop_requested = False
+
+            for comando in comandos_pendientes:
+                command_id = comando.get("id")
+                action = comando.get("action")
+
+                try:
+                    if action == "stop":
+                        runtime_commands.mark_done(command_id, "Stop ejecutado correctamente.")
+                        runtime_state.mark_stopped(
+                            reason="REMOTE_STOP",
+                            balance_actual=gestor.balance_actual,
+                            open_positions=len(gestor.posiciones)
+                        )
+                        print("\n🛑 Comando remoto recibido: STOP")
+                        stop_requested = True
+                        break
+
+                    elif action == "closeall":
+                        resultado = cerrar_todas_las_posiciones(
+                            gestor,
+                            motivo="REMOTE_CLOSEALL",
+                            label="REMOTE"
+                        )
+                        runtime_commands.mark_done(command_id, resultado)
+
+                    else:
+                        runtime_commands.mark_failed(
+                            command_id,
+                            f"Acción no soportada: {action}"
+                        )
+
+                except Exception as command_error:
+                    runtime_commands.mark_failed(command_id, str(command_error))
+                    print(f"\n⚠️ Error procesando comando remoto {action}: {command_error}")
+
+            if stop_requested:
+                break
+
+            runtime_state.update_heartbeat(
+                balance_actual=gestor.balance_actual,
+                open_positions=len(gestor.posiciones)
+            )
+
             # 2. RASTREO: Consultamos si alguna ballena ha operado
             # get_signal() ahora nos devuelve una lista de diccionarios con 'label'
             nuevas_señales = signal_provider.get_signal()
@@ -166,6 +252,11 @@ def main():
                 # El gestor decide si cerrar según los límites
                 gestor.gestionar_salidas(precios_vivos)
 
+            runtime_state.mark_cycle_ok(
+                balance_actual=gestor.balance_actual,
+                open_positions=len(gestor.posiciones)
+            )
+
             # 5. DESCANSO: Evitamos saturar las APIs (Helius/Binance)
             # Imprimimos un punto cada ciclo para saber que el bot sigue vivo
             sys.stdout.write(".")
@@ -189,22 +280,26 @@ def main():
 
                 if comando == "EXIT":
                     print("🛑 Apagando el bot...")
+                    runtime_state.mark_stopped(
+                        reason="LOCAL_EXIT",
+                        balance_actual=gestor.balance_actual,
+                        open_positions=len(gestor.posiciones)
+                    )
                     break
 
                 elif comando == "CLOSEALL":
-                    print("🛑 Cerrando TODAS las posiciones...")
-                    for activo in list(gestor.posiciones.keys()):
-                        precio = obtener_precio_binance(activo)
-                        if precio:
-                            gestor.cerrar_posicion(
-                                activo,
-                                precio,
-                                label="MANUAL",
-                                motivo="CIERRE MANUAL"
-                            )
-                        else:
-                            print(f"⚠️ No se pudo obtener el precio para {activo}. Se queda abierta.")
+                    resultado = cerrar_todas_las_posiciones(
+                        gestor,
+                        motivo="CIERRE MANUAL",
+                        label="MANUAL"
+                    )
+                    print(resultado)
                     print("🛑 Apagando el bot...")
+                    runtime_state.mark_stopped(
+                        reason="LOCAL_CLOSEALL_AND_EXIT",
+                        balance_actual=gestor.balance_actual,
+                        open_positions=len(gestor.posiciones)
+                    )
                     break
 
                 elif comando.isdigit():
@@ -226,6 +321,11 @@ def main():
                         sub_comando = input("👉 ¿Deseas apagar el bot ahora? (S/N): ").strip().upper()
                         if sub_comando == "S" or sub_comando == "Y":
                             print("🛑 Apagando el bot...")
+                            runtime_state.mark_stopped(
+                                reason="LOCAL_EXIT_AFTER_MANUAL_CLOSE",
+                                balance_actual=gestor.balance_actual,
+                                open_positions=len(gestor.posiciones)
+                            )
                             break
                         else:
                             print("▶️ Reanudando radar...")
@@ -247,6 +347,11 @@ def main():
                     sub_comando = input("👉 ¿Deseas apagar el bot ahora? (S/N): ").strip().upper()
                     if sub_comando == "S" or sub_comando == "Y":
                         print("🛑 Apagando el bot...")
+                        runtime_state.mark_stopped(
+                            reason="LOCAL_EXIT_AFTER_MANUAL_CLOSE",
+                            balance_actual=gestor.balance_actual,
+                            open_positions=len(gestor.posiciones)
+                        )
                         break
                     else:
                         print("▶️ Reanudando radar...")
@@ -262,13 +367,23 @@ def main():
 
                 if comando == "exit":
                     print("🛑 Apagando el bot...")
+                    runtime_state.mark_stopped(
+                        reason="LOCAL_EXIT_NO_OPEN_POSITIONS",
+                        balance_actual=gestor.balance_actual,
+                        open_positions=len(gestor.posiciones)
+                    )
                     break
 
                 print("▶️ Reanudando radar...")
 
         except Exception as e:
+            runtime_state.mark_error(
+                error_message=e,
+                balance_actual=gestor.balance_actual,
+                open_positions=len(gestor.posiciones)
+            )
             print(f"\n⚠️ Error en el bucle principal: {e}")
-            time.sleep(10)  # Espera antes de reintentar
+            time.sleep(10)
 
 
 if __name__ == "__main__":
