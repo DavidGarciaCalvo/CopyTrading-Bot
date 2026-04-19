@@ -13,3 +13,9 @@ SQLAlchemy
 pandas
 numpy
 matplotlib
+
+# Notificaciones del bot principal vía Telegram
+pyTelegramBotAPI
+
+# Control remoto del bot vía Telegram
+python-telegram-bot
